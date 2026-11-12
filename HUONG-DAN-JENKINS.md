@@ -18,6 +18,8 @@ Jenkins được cài ở `%LOCALAPPDATA%\Programs\JenkinsRuntime`; nếu đã d
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\start-jenkins-windows.ps1
 ```
 
+Scheduled Task `Jenkins Native Controller` tự chạy script này khi tài khoản Windows đăng nhập. Docker Desktop cần phiên người dùng đăng nhập để pipeline build/deploy được.
+
 ## Job theo dõi `main`
 
 Job `giai-dau-ci` đã được tạo và cấu hình:
