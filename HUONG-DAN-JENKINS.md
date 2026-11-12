@@ -1,6 +1,16 @@
 # Jenkins CI/CD
 
-Jenkins chạy cài trực tiếp trên Windows, không chạy trong Docker. Ứng dụng và PostgreSQL vẫn chạy bằng Docker Compose. Agent Jenkins cần cài Git, Node.js 22+, Docker Desktop CLI và được phép dùng Docker Desktop của tài khoản chạy agent.
+Jenkins chạy native trên Windows, không chạy trong Docker. Ứng dụng và PostgreSQL vẫn chạy bằng Docker Compose. Agent Jenkins cần Git, Node.js 22+, Docker Desktop CLI và quyền dùng Docker Desktop của tài khoản đang đăng nhập.
+
+## Chạy Jenkins trên máy Windows này
+
+Java 21 và Jenkins LTS được cài ở `%LOCALAPPDATA%\Programs\JenkinsRuntime`; Jenkins home nằm tại `%USERPROFILE%\.jenkins-home`. Chạy PowerShell:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\start-jenkins-windows.ps1
+```
+
+Mở http://localhost:8081. Lần đầu, nhập mật khẩu từ `%USERPROFILE%\.jenkins-home\secrets\initialAdminPassword`, cài Suggested Plugins, rồi tạo tài khoản quản trị. Jenkins chạy dưới tài khoản Windows hiện tại, không phải Docker container hay LocalSystem service.
 
 ## Cấu hình job
 
