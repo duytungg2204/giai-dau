@@ -1,0 +1,92 @@
+pipeline {
+    agent any
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+    }
+
+    triggers {
+        pollSCM('* * * * *')
+    }
+
+    parameters {
+        string(name: 'DOCKERHUB_REPO', defaultValue: '', description: 'Docker Hub repository, for example username/giai-dau. Leave blank to build locally without pushing.')
+        string(name: 'IMAGE_TAG', defaultValue: 'latest', description: 'Tag to publish for builds from main.')
+    }
+
+    environment {
+        DOCKERHUB_CREDENTIALS = 'hubdocker'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Validate application') {
+            steps {
+                bat 'npm ci'
+                bat 'npm run check'
+            }
+        }
+
+        stage('Build Docker image') {
+            when {
+                expression { isMainBranch() }
+            }
+            steps {
+                script {
+                    def repo = params.DOCKERHUB_REPO.trim()
+                    def tag = params.IMAGE_TAG.trim()
+                    if (repo && !(repo ==~ /[a-z0-9]+(?:[._-][a-z0-9]+)*\/[a-z0-9]+(?:[._-][a-z0-9]+)*/)) {
+                        error('DOCKERHUB_REPO must use the format username/repository.')
+                    }
+                    if (repo && !(tag ==~ /[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}/)) {
+                        error('IMAGE_TAG contains unsupported characters.')
+                    }
+                    def imageName = repo ? "${repo}:${tag}" : "giai-dau:${env.BUILD_NUMBER}"
+                    env.BUILT_IMAGE = imageName
+                    bat "docker build --tag ${imageName} ."
+                }
+            }
+        }
+
+        stage('Push image to Docker Hub') {
+            when {
+                expression { isMainBranch() && params.DOCKERHUB_REPO?.trim() }
+            }
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDENTIALS, usernameVariable: 'DOCKERHUB_USER', passwordVariable: 'DOCKERHUB_TOKEN')]) {
+                        bat 'echo %DOCKERHUB_TOKEN%| docker login --username %DOCKERHUB_USER% --password-stdin'
+                        bat "docker push ${env.BUILT_IMAGE}"
+                        bat 'docker logout'
+                    }
+                }
+            }
+        }
+
+        stage('Deployment instructions') {
+            when {
+                expression { isMainBranch() }
+            }
+            steps {
+                echo 'Build complete. Deploy with docker compose up -d --build on the target host.'
+            }
+        }
+
+        stage('Archive build files') {
+            steps {
+                archiveArtifacts artifacts: 'Jenkinsfile,package.json,package-lock.json,server.js,giai-dau.html,scripts/validate.js,Dockerfile,.dockerignore', fingerprint: true
+            }
+        }
+    }
+}
+
+def isMainBranch() {
+    def branch = (env.BRANCH_NAME ?: env.GIT_BRANCH ?: '').tokenize('/').last()
+    return branch == 'main'
+}
