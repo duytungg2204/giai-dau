@@ -53,4 +53,10 @@ if (-not $ready) {
 }
 
 Write-Output "Jenkins is running at http://localhost:8081 (PID $($process.Id))."
-Write-Output "Complete the setup wizard; the initial password is in $jenkinsHome\secrets\initialAdminPassword"
+$adminCredentials = Join-Path $jenkinsHome 'secrets\jenkins-admin-credentials.txt'
+$initialPassword = Join-Path $jenkinsHome 'secrets\initialAdminPassword'
+if (Test-Path -LiteralPath $adminCredentials -PathType Leaf) {
+  Write-Output "Admin login details are stored locally in $adminCredentials"
+} elseif (Test-Path -LiteralPath $initialPassword -PathType Leaf) {
+  Write-Output "Complete the setup wizard with the password in $initialPassword"
+}
