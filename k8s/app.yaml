@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: app
-          # Script CI thay placeholder bằng image đã được nạp vào kind.
+          # The deployment script replaces this placeholder with the imported local image.
           image: giai-dau-app:IMAGE_PLACEHOLDER
           imagePullPolicy: IfNotPresent
           ports:
@@ -67,12 +67,11 @@ metadata:
   name: giai-dau-app
   namespace: giai-dau
 spec:
-  type: NodePort
+  type: LoadBalancer
   selector:
     app: giai-dau-app
   ports:
     - name: http
-      port: 8000
+      port: 8002
       targetPort: http
       protocol: TCP
-      nodePort: 30080

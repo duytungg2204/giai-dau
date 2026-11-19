@@ -11,8 +11,6 @@ param(
 $ErrorActionPreference = 'Stop'
 $SourceDir = [System.IO.Path]::GetFullPath($SourceDir)
 $DeployDir = [System.IO.Path]::GetFullPath($DeployDir)
-$kindPath = Join-Path $env:LOCALAPPDATA 'Programs\Kubernetes\kind-v0.33.exe'
-$kind = if (Test-Path -LiteralPath $kindPath) { $kindPath } else { (Get-Command kind.exe -ErrorAction Stop).Source }
 $kubectl = (Get-Command kubectl.exe -ErrorAction Stop).Source
 $docker = (Get-Command docker.exe -ErrorAction Stop).Source
 $envFile = Join-Path $DeployDir '.env'
@@ -27,17 +25,17 @@ foreach ($file in @($envFile, $namespaceFile, $appFile)) {
   if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Required file is missing: $file" }
 }
 
-# Use the local kind cluster created for this project; Compose remains the default deployment target.
-& $kind get clusters | Out-Null
-if ($LASTEXITCODE -ne 0) { throw 'Could not query kind clusters.' }
-$clusters = & $kind get clusters
-if ($LASTEXITCODE -ne 0 -or $clusters -notcontains 'giai-dau') {
-  throw "kind cluster 'giai-dau' is not available. Run scripts\setup-kubernetes-windows.ps1 first."
+# Use Docker Desktop's integrated cluster. Compose remains the default deployment target.
+$desktopStatusOutput = docker desktop kubernetes status 2>&1
+$desktopStatusCode = $LASTEXITCODE
+$desktopStatus = $desktopStatusOutput | Out-String
+if ($desktopStatusCode -ne 0 -or $desktopStatus -notmatch '(?m)^State:\s+running\s*$') {
+  throw "Docker Desktop Kubernetes is not running.`n$desktopStatus"
 }
-& $kubectl config use-context 'kind-giai-dau' | Out-Null
-if ($LASTEXITCODE -ne 0) { throw 'Could not select Kubernetes context kind-giai-dau.' }
-& $kubectl get nodes --request-timeout='15s' | Out-Null
-if ($LASTEXITCODE -ne 0) { throw 'Kubernetes cluster is unavailable.' }
+& $kubectl config use-context 'docker-desktop' | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'Could not select Kubernetes context docker-desktop.' }
+& $kubectl wait --for=condition=Ready node --all --timeout=180s
+if ($LASTEXITCODE -ne 0) { throw 'Kubernetes node is not Ready.' }
 
 # Keep database private: attach its existing Compose container to kind's internal Docker network.
 $dbHealth = & $docker inspect $dbContainer --format '{{.State.Health.Status}}' 2>$null
@@ -134,9 +132,41 @@ try {
   Remove-Item -LiteralPath $tempSecret, $tempDbResources -Force -ErrorAction SilentlyContinue
 }
 
-# Load the locally built image into kind, then apply the exact commit image to the Deployment.
-& $kind load docker-image $Image --name giai-dau
-if ($LASTEXITCODE -ne 0) { throw "Could not load local image into kind: $Image" }
+# Import the local Docker image into the integrated cluster's containerd image store.
+$nodeName = & $kubectl get nodes -o 'jsonpath={.items[0].metadata.name}'
+if ($LASTEXITCODE -ne 0 -or -not $nodeName) { throw 'Could not determine the Docker Desktop Kubernetes node.' }
+$imageArchive = Join-Path $env:TEMP "giai-dau-image-$PID.tar"
+$containerArchive = "/tmp/giai-dau-image-$PID.tar"
+try {
+  & $docker image inspect $Image | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "Local Docker image was not found: $Image" }
+  & $docker image save --output $imageArchive $Image
+  if ($LASTEXITCODE -ne 0) { throw "Could not save local image: $Image" }
+  $copyInfo = [System.Diagnostics.ProcessStartInfo]::new()
+  $copyInfo.FileName = $docker
+  $copyInfo.Arguments = "exec -i $nodeName sh -c `"cat > $containerArchive`""
+  $copyInfo.UseShellExecute = $false
+  $copyInfo.RedirectStandardInput = $true
+  $copyInfo.RedirectStandardOutput = $true
+  $copyInfo.RedirectStandardError = $true
+  $copyProcess = [System.Diagnostics.Process]::new()
+  $copyProcess.StartInfo = $copyInfo
+  [void]$copyProcess.Start()
+  $imageStream = [System.IO.File]::OpenRead($imageArchive)
+  try { $imageStream.CopyTo($copyProcess.StandardInput.BaseStream) }
+  finally { $imageStream.Dispose(); $copyProcess.StandardInput.Close() }
+  $copyOutput = $copyProcess.StandardOutput.ReadToEnd()
+  $copyError = $copyProcess.StandardError.ReadToEnd()
+  $copyProcess.WaitForExit()
+  if ($copyProcess.ExitCode -ne 0) { throw "Could not stream image archive to the Kubernetes node: $copyError $copyOutput" }
+  & $docker exec $nodeName ctr --namespace k8s.io images import $containerArchive
+  if ($LASTEXITCODE -ne 0) { throw 'Could not import the image into the Kubernetes containerd store.' }
+  & $docker exec $nodeName rm -f $containerArchive
+  if ($LASTEXITCODE -ne 0) { Write-Warning 'Imported image but could not remove its temporary archive from the node.' }
+} finally {
+  Remove-Item -LiteralPath $imageArchive -Force -ErrorAction SilentlyContinue
+  & $docker exec $nodeName rm -f $containerArchive 2>$null | Out-Null
+}
 $deploymentsJson = & $kubectl get deployments --namespace $Namespace -o json
 $deploymentsExitCode = $LASTEXITCODE
 $oldRevision = $null
