@@ -3,6 +3,8 @@ $ErrorActionPreference = 'Stop'
 $runtimeDir = Join-Path $env:LOCALAPPDATA 'Programs\JenkinsRuntime'
 $jdkRoot = Join-Path $runtimeDir 'jdk-21'
 $jenkinsDir = Join-Path $runtimeDir 'jenkins'
+$kubernetesToolsDir = Join-Path $env:LOCALAPPDATA 'Programs\Kubernetes'
+$dockerDesktopToolsDir = Join-Path $env:LOCALAPPDATA 'Programs\DockerDesktop\resources\bin'
 $jenkinsHome = Join-Path $env:USERPROFILE '.jenkins-home'
 $warPath = Join-Path $jenkinsDir 'jenkins.war'
 $jdk = Get-ChildItem -LiteralPath $jdkRoot -Directory -Filter 'jdk-*' | Select-Object -First 1
@@ -29,7 +31,7 @@ if ($existing) {
 New-Item -ItemType Directory -Force -Path $jenkinsHome | Out-Null
 $env:JENKINS_HOME = $jenkinsHome
 $env:JAVA_HOME = $jdk.FullName
-$env:PATH = "C:\Program Files\nodejs;C:\Program Files\Git\cmd;$($jdk.FullName)\bin;$env:PATH"
+$env:PATH = "C:\Program Files\nodejs;C:\Program Files\Git\cmd;$kubernetesToolsDir;$dockerDesktopToolsDir;$($jdk.FullName)\bin;$env:PATH"
 $stdout = Join-Path $jenkinsDir 'jenkins.out.log'
 $stderr = Join-Path $jenkinsDir 'jenkins.err.log'
 $arguments = "-Xms256m -Xmx1024m -Djava.awt.headless=true -jar `"$warPath`" --httpPort=8081"

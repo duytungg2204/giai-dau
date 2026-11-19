@@ -1,3 +1,5 @@
+# Triển khai image app mới bằng Docker Compose; PostgreSQL và volume dữ liệu được giữ nguyên.
+# Nếu health check HTTP thất bại, khôi phục image app đang chạy trước khi deploy.
 param(
   [Parameter(Mandatory = $true)]
   [string]$SourceDir,
@@ -10,6 +12,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Chuẩn hóa đường dẫn để Compose luôn dùng đúng source và .env của máy chạy ứng dụng.
 $SourceDir = [System.IO.Path]::GetFullPath($SourceDir)
 $DeployDir = [System.IO.Path]::GetFullPath($DeployDir)
 $composeFile = Join-Path $SourceDir 'docker-compose.yml'
@@ -20,6 +23,7 @@ $databaseContainer = 'giai-dau-db'
 $deployTag = 'giai-dau-app:deploy'
 $rollbackTag = 'giai-dau-app:rollback'
 $composeArgs = @(
+  # Giữ project name ổn định để Compose quản lý đúng container và volume hiện có.
   'compose', '--env-file', $envFile,
   '--project-directory', $DeployDir,
   '--project-name', 'cuoikytkpm-main',
@@ -32,6 +36,7 @@ foreach ($file in @($composeFile, $envFile)) {
   }
 }
 
+# Chặn cấu hình sai trước khi thay image đang phục vụ.
 $composeText = Get-Content -LiteralPath $composeFile -Raw
 if ($composeText -notmatch '(?m)^\s*image:\s*giai-dau-app:deploy\s*$') {
   throw 'The Compose app service must use image giai-dau-app:deploy.'
@@ -41,6 +46,7 @@ if ($composeText -notmatch '(?m)^\s*image:\s*giai-dau-app:deploy\s*$') {
 if ($LASTEXITCODE -ne 0) { throw 'Docker Compose configuration is invalid.' }
 
 $databaseHealth = & $docker inspect $databaseContainer --format '{{.State.Health.Status}}' 2>$null
+# Không deploy app mới nếu DB chưa healthy; app hiện tại sẽ tiếp tục chạy.
 if ($LASTEXITCODE -ne 0 -or $databaseHealth.Trim() -ne 'healthy') {
   throw "PostgreSQL container $databaseContainer is not healthy; the running app was left unchanged."
 }
@@ -51,6 +57,7 @@ if ($LASTEXITCODE -ne 0 -or -not $newImageId) {
 }
 
 $oldImageId = & $docker container inspect $containerName --format '{{.Image}}' 2>$null
+# Phải có image app hiện tại để đảm bảo luôn có bản quay lui.
 if ($LASTEXITCODE -ne 0 -or -not $oldImageId) {
   throw "Current app container $containerName was not found; refusing a deployment without a rollback image."
 }
@@ -61,6 +68,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Could not preserve the current app image for r
 if ($LASTEXITCODE -ne 0) { throw 'Could not tag the new app image for deployment.' }
 
 function Wait-ForApp([int]$Attempts = 30) {
+  # Chờ tối đa 60 giây; endpoint trả HTTP 200 nghĩa là app và DB đã khởi tạo xong.
   for ($attempt = 0; $attempt -lt $Attempts; $attempt++) {
     Start-Sleep -Seconds 2
     try {
@@ -80,6 +88,7 @@ function Wait-ForApp([int]$Attempts = 30) {
 
 $deploymentStarted = $false
 try {
+  # Chỉ thay service app, không recreate database hoặc đụng vào volume dữ liệu.
   $deploymentStarted = $true
   & $docker @composeArgs up -d --no-deps --no-build app
   if ($LASTEXITCODE -ne 0) { throw 'Compose could not start the new app container.' }
@@ -93,6 +102,7 @@ try {
 } catch {
   $deploymentError = $_
   if ($deploymentStarted) {
+    # Gắn lại tag deploy vào image cũ, khởi động lại app và kiểm tra health lần nữa.
     & $docker image tag $oldImageId $deployTag
     if ($LASTEXITCODE -ne 0) { throw "Deployment failed and the previous image could not be restored: $deploymentError" }
 

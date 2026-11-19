@@ -10,3 +10,5 @@ node_modules/
 *.backup
 .postgres-admin-password.txt
 .server-client/
+k8s/*secret*.yaml
+scripts/.k8s-secret*

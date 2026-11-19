@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: giai-dau-app
+  namespace: giai-dau
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: giai-dau-app
+  template:
+    metadata:
+      labels:
+        app: giai-dau-app
+    spec:
+      containers:
+        - name: app
+          # Script CI thay placeholder bằng image đã được nạp vào kind.
+          image: giai-dau-app:IMAGE_PLACEHOLDER
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: PORT
+              value: "8000"
+            - name: HOST
+              value: 0.0.0.0
+            - name: DB_POOL_SIZE
+              value: "20"
+            - name: PGSSL
+              value: "false"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: giai-dau-db
+                  key: DATABASE_URL
+          readinessProbe:
+            httpGet:
+              path: /api/bootstrap-status
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /api/bootstrap-status
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: giai-dau-app
+  namespace: giai-dau
+spec:
+  type: NodePort
+  selector:
+    app: giai-dau-app
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP
+      nodePort: 30080

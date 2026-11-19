@@ -38,6 +38,21 @@ Nếu cần tạo lại job, chọn **New Item → Pipeline → Pipeline script 
 
 ## Build, deploy và rollback
 
-Pipeline chạy `npm ci`, `npm run check`, build Docker image theo commit rồi deploy ứng dụng bằng Compose. Nếu validate hoặc build lỗi, bước deploy không chạy và container hiện tại tiếp tục phục vụ. Nếu container mới không trả HTTP 200 ở `/api/bootstrap-status`, pipeline khôi phục image trước đó và kiểm tra lại app. PostgreSQL và volume dữ liệu không bị thay đổi.
+Pipeline chạy `npm ci`, `npm run check`, rồi build Docker image có tag theo commit. Tham số `DEPLOY_TARGET` chọn nơi deploy:
+
+- `compose` (mặc định): dùng `.env` trong `DEPLOY_DIR`, chỉ cập nhật app. Nếu app mới không trả HTTP 200 ở `/api/bootstrap-status`, pipeline khôi phục image trước đó. PostgreSQL và volume Compose hiện tại không bị thay đổi.
+- `kubernetes`: dùng cluster `kind` local; Jenkins nạp image vừa build trực tiếp vào cluster, không cần registry. Script nối container PostgreSQL hiện có vào mạng nội bộ của kind, tạo Kubernetes Service/EndpointSlice và Secret DB tạm từ `.env`, sau đó cập nhật Deployment. Pipeline chờ readiness; nếu rollout lỗi, script rollback Deployment về revision trước.
+
+### Chuẩn bị Kubernetes lần đầu
+
+Cluster local đã được tạo bằng `scripts/setup-kubernetes-windows.ps1`; cấu hình cluster và cổng nằm trong `k8s/kind-config.yaml`. Nếu cần tạo lại trên máy này:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\setup-kubernetes-windows.ps1
+```
+
+Kubernetes app dùng chung PostgreSQL Compose đang có; Secret được tạo tự động từ file `.env` local và không commit lên Git. Database chỉ kết nối qua mạng Docker nội bộ, cổng host `5432` vẫn bind vào `127.0.0.1`. Không xóa cluster nếu muốn giữ workload của Kubernetes.
+
+Khi Jenkins job `giai-dau-ci` nhận Jenkinsfile mới, chọn `DEPLOY_TARGET=kubernetes` để deploy. App Compose hiện tại tiếp tục ở `http://localhost:8000`; app Kubernetes ở `http://localhost:8002`. Kubernetes mặc định dùng namespace `giai-dau`, Deployment `giai-dau-app`, container `app`.
 
 Thư mục deploy mặc định là `%USERPROFILE%\Downloads\cuoikytkpm-main\cuoikytkpm-main`, nơi chứa `.env` local. Nếu repo nằm ở chỗ khác, đặt tham số job `DEPLOY_DIR` thành thư mục có `.env`.
